@@ -31,9 +31,8 @@ import numpy as np
 import pdb
 
 from sklearn.feature_extraction.text import TfidfVectorizer
-from email.message import Message
-from urllib.parse import urlparse
 from bs4 import BeautifulSoup
+from urllib.parse import urlparse
 
 NUM_TRAINING_EXAMPLES = 4172
 NUM_TEST_EXAMPLES = 1000
@@ -342,7 +341,6 @@ def subject_empty_feature(text, freq):
         return 0.0
 
 # HTML analysis features - split into individual functions
-
 def _get_html_payload(text):
     """Helper function to extract HTML content from email"""
     try:
@@ -436,6 +434,296 @@ def specific_names_feature(text, freq):
     text_lower = text.lower()
     return sum(text_lower.count(name) for name in spam_specific_names)
 
+# ================== ADVANCED FEATURE ENGINEERING FUNCTIONS ==================
+
+# Text Quality & Sophistication Features
+def readability_score_feature(text, freq):
+    """
+    Calculate Flesch-Kincaid readability score approximation.
+    Spam often has poor readability.
+    """
+    sentences = re.split(r'[.!?]+', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    words = text.split()
+    
+    if len(sentences) == 0 or len(words) == 0:
+        return 0.0
+    
+    # Count syllables (approximation)
+    syllable_count = 0
+    for word in words:
+        word = re.sub(r'[^a-zA-Z]', '', word.lower())
+        if word:
+            # Simple syllable counting heuristic
+            vowels = 'aeiouy'
+            syllables = 0
+            prev_was_vowel = False
+            for char in word:
+                is_vowel = char in vowels
+                if is_vowel and not prev_was_vowel:
+                    syllables += 1
+                prev_was_vowel = is_vowel
+            # Ensure at least one syllable per word
+            syllable_count += max(1, syllables)
+    
+    avg_sentence_length = len(words) / len(sentences)
+    avg_syllables_per_word = syllable_count / len(words)
+    
+    # Flesch-Kincaid Grade Level approximation
+    readability = 0.39 * avg_sentence_length + 11.8 * avg_syllables_per_word - 15.59
+    return float(readability)
+
+def sentence_structure_feature(text, freq):
+    """
+    Calculate average sentence length.
+    Spam often has fragmented sentences.
+    """
+    sentences = re.split(r'[.!?]+', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    
+    if len(sentences) == 0:
+        return 0.0
+    
+    total_words = 0
+    for sentence in sentences:
+        words = sentence.split()
+        total_words += len(words)
+    
+    return float(total_words / len(sentences))
+
+def vocabulary_richness_feature(text, freq):
+    """
+    Calculate type-token ratio (unique words / total words).
+    Spam has repetitive vocabulary, resulting in lower ratios.
+    """
+    words = re.findall(r'\w+', text.lower())
+    if len(words) == 0:
+        return 0.0
+    
+    unique_words = len(set(words))
+    total_words = len(words)
+    
+    return float(unique_words / total_words)
+
+# Advanced N-gram Features
+def character_ngram_feature(text, freq):
+    """
+    Detect suspicious character-level patterns.
+    Catches obfuscation like "v1agra", "c1al1s".
+    """
+    text_clean = re.sub(r'[^a-zA-Z0-9]', '', text.lower())
+    if len(text_clean) < 3:
+        return 0.0
+    
+    suspicious_patterns = [
+        r'[a-z][0-9][a-z]',  # letter-number-letter patterns
+        r'[0-9][a-z][0-9]',  # number-letter-number patterns
+        r'[a-z]{2}[0-9]',    # two letters followed by number
+        r'[0-9][a-z]{2}',    # number followed by two letters
+    ]
+    
+    count = 0
+    for pattern in suspicious_patterns:
+        matches = re.findall(pattern, text_clean)
+        count += len(matches)
+    
+    return float(count)
+
+def suspicious_word_patterns_feature(text, freq):
+    """
+    Detect words with suspicious patterns like mixed case, numbers in words.
+    """
+    words = re.findall(r'\b\w+\b', text)
+    suspicious_count = 0
+    
+    for word in words:
+        if len(word) < 3:
+            continue
+            
+        # Mixed case within word (not just first letter capitalized)
+        if word != word.lower() and word != word.upper() and word != word.capitalize():
+            suspicious_count += 1
+            continue
+            
+        # Numbers mixed with letters
+        if re.search(r'[0-9]', word) and re.search(r'[a-zA-Z]', word):
+            suspicious_count += 1
+            continue
+            
+        # Repeated characters (like "freeeee")
+        if re.search(r'(.)\1{2,}', word):
+            suspicious_count += 1
+    
+    return float(suspicious_count)
+
+def word_bigram_spam_feature(text, freq):
+    """
+    Detect high-value word pair combinations commonly found in spam.
+    """
+    spam_bigrams = [
+        ('click', 'here'), ('act', 'now'), ('limited', 'time'),
+        ('free', 'trial'), ('risk', 'free'), ('money', 'back'),
+        ('no', 'obligation'), ('call', 'now'), ('order', 'now'),
+        ('buy', 'now'), ('get', 'free'), ('make', 'money'),
+        ('work', 'home'), ('lose', 'weight'), ('stop', 'snoring'),
+        ('credit', 'card'), ('loan', 'approved'), ('debt', 'free')
+    ]
+    
+    words = re.findall(r'\b\w+\b', text.lower())
+    bigram_count = 0
+    
+    for i in range(len(words) - 1):
+        bigram = (words[i], words[i + 1])
+        if bigram in spam_bigrams:
+            bigram_count += 1
+    
+    return float(bigram_count)
+
+# Deception & Urgency Detection Features
+def deceptive_language_feature(text, freq):
+    """
+    Detect words that create false urgency or scarcity.
+    """
+    deceptive_words = [
+        'urgent', 'immediate', 'expires', 'deadline', 'hurry',
+        'limited', 'exclusive', 'secret', 'confidential', 'insider',
+        'guaranteed', 'promise', 'certain', 'proven', 'verified',
+        'authentic', 'genuine', 'real', 'actual', 'true',
+        'last', 'final', 'only', 'few', 'remaining', 'left',
+        'once', 'lifetime', 'opportunity', 'chance', 'offer'
+    ]
+    
+    text_lower = text.lower()
+    count = 0
+    for word in deceptive_words:
+        count += text_lower.count(word)
+    
+    return float(count)
+
+def social_engineering_feature(text, freq):
+    """
+    Detect authority and trust exploitation terms.
+    """
+    authority_terms = [
+        'government', 'federal', 'irs', 'fbi', 'police', 'legal',
+        'court', 'judge', 'lawyer', 'attorney', 'official',
+        'authorized', 'certified', 'licensed', 'approved',
+        'bank', 'paypal', 'amazon', 'microsoft', 'apple',
+        'google', 'facebook', 'security', 'department',
+        'administration', 'agency', 'bureau', 'office'
+    ]
+    
+    trust_terms = [
+        'trust', 'secure', 'safe', 'protected', 'guaranteed',
+        'insured', 'verified', 'authenticated', 'legitimate',
+        'reliable', 'reputable', 'established', 'professional'
+    ]
+    
+    text_lower = text.lower()
+    count = 0
+    
+    for term in authority_terms + trust_terms:
+        count += text_lower.count(term)
+    
+    return float(count)
+
+def call_to_action_density_feature(text, freq):
+    """
+    Calculate density of action-oriented phrases.
+    """
+    action_phrases = [
+        'click here', 'click now', 'download now', 'buy now',
+        'order now', 'call now', 'apply now', 'sign up',
+        'register now', 'subscribe', 'join now', 'get started',
+        'learn more', 'find out', 'discover', 'try now',
+        'start now', 'act now', 'hurry', 'dont wait',
+        'limited time', 'expires soon', 'order today'
+    ]
+    
+    text_lower = text.lower()
+    words = text.split()
+    
+    if len(words) == 0:
+        return 0.0
+    
+    action_count = 0
+    for phrase in action_phrases:
+        action_count += text_lower.count(phrase)
+    
+    # Return density (actions per 100 words)
+    return float((action_count / len(words)) * 100)
+
+# Advanced Structural Features
+def email_forwarding_chain_feature(text, freq):
+    """
+    Detect email forwarding patterns common in spam chains.
+    """
+    forwarding_patterns = [
+        r'forwarded by',
+        r'from:.*to:.*subject:',
+        r'-----original message-----',
+        r'> > >',  # Multiple quote levels
+        r'fwd:.*fwd:',  # Multiple forwards
+        r'chain.*letter',
+        r'send.*to.*friends',
+        r'forward.*this',
+        r'pass.*along'
+    ]
+    
+    text_lower = text.lower()
+    pattern_count = 0
+    
+    for pattern in forwarding_patterns:
+        matches = re.findall(pattern, text_lower)
+        pattern_count += len(matches)
+    
+    return float(pattern_count)
+
+def attachment_mention_feature(text, freq):
+    """
+    Detect references to attachments which can be suspicious.
+    """
+    attachment_terms = [
+        'attachment', 'attached', 'file', 'document', 'pdf',
+        'doc', 'zip', 'exe', 'download', 'open', 'view',
+        'see attached', 'attached file', 'click to open',
+        'download now', 'install', 'run'
+    ]
+    
+    text_lower = text.lower()
+    count = 0
+    
+    for term in attachment_terms:
+        count += text_lower.count(term)
+    
+    return float(count)
+
+def time_pressure_feature(text, freq):
+    """
+    Detect time-sensitive language patterns that create pressure.
+    """
+    time_pressure_patterns = [
+        r'\d+\s*(hour|day|minute)s?\s*(left|remaining)',
+        r'expires?\s*(today|tomorrow|soon)',
+        r'(today|now)\s*only',
+        r'limited\s*time',
+        r'act\s*(now|today|immediately)',
+        r'(hurry|rush|quick)',
+        r'deadline.*approach',
+        r'last.*chance',
+        r'final.*notice',
+        r'urgent.*action'
+    ]
+    
+    text_lower = text.lower()
+    pattern_count = 0
+    
+    for pattern in time_pressure_patterns:
+        matches = re.findall(pattern, text_lower)
+        pattern_count += len(matches)
+    
+    return float(pattern_count)
+
 # Generates a feature vector
 def generate_feature_vector(text, freq):
     feature = []
@@ -517,6 +805,27 @@ def generate_feature_vector(text, freq):
 
     # TF-IDF aggregate score
     feature.append(tfidf_score_feature(text, freq))
+
+    # --------- Advanced Feature Engineering Functions ---------
+    # Text Quality & Sophistication
+    feature.append(readability_score_feature(text, freq))
+    feature.append(sentence_structure_feature(text, freq))
+    feature.append(vocabulary_richness_feature(text, freq))
+    
+    # Advanced N-gram Features
+    feature.append(character_ngram_feature(text, freq))
+    feature.append(suspicious_word_patterns_feature(text, freq))
+    feature.append(word_bigram_spam_feature(text, freq))
+    
+    # Deception & Urgency Detection
+    feature.append(deceptive_language_feature(text, freq))
+    feature.append(social_engineering_feature(text, freq))
+    feature.append(call_to_action_density_feature(text, freq))
+    
+    # Advanced Structural Features
+    feature.append(email_forwarding_chain_feature(text, freq))
+    feature.append(attachment_mention_feature(text, freq))
+    feature.append(time_pressure_feature(text, freq))
 
     return feature
 
