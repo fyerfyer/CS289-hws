@@ -1,2 +1,7 @@
 __pycache__/
 data/
+.roo/
+.roomodes
+generate_mcp_yaml.py
+install_rooflow.sh
+*.csv
