@@ -434,8 +434,6 @@ def specific_names_feature(text, freq):
     text_lower = text.lower()
     return sum(text_lower.count(name) for name in spam_specific_names)
 
-# ================== ADVANCED FEATURE ENGINEERING FUNCTIONS ==================
-
 # Text Quality & Sophistication Features
 def readability_score_feature(text, freq):
     """
