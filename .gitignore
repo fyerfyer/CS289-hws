@@ -1,7 +1,10 @@
 __pycache__/
 data/
+datasets/
+im2spain_images/
 .roo/
 .roomodes
 generate_mcp_yaml.py
 install_rooflow.sh
 *.csv
+*.npz
