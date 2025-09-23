@@ -131,14 +131,16 @@ class FullyConnected(Layer):
 
         ### BEGIN YOUR CODE ###
 
-        W = self.init_weights(...)
-        b = ...
+        W = self.init_weights((self.n_in, self.n_out))
+        b = np.zeros((1, self.n_out))
 
         self.parameters = OrderedDict({"W": W, "b": b}) # DO NOT CHANGE THE KEYS
-        self.cache: OrderedDict = ...  # cache for backprop
-        self.gradients: OrderedDict = ...  # parameter gradients initialized to zero
-                                           # MUST HAVE THE SAME KEYS AS `self.parameters`
-
+        self.cache = OrderedDict ({"X": None, "Z": None})  # cache for backprop
+        self.gradients = OrderedDict({
+            "W": np.zeros_like(W),
+            "b": np.zeros_like(b)
+        })
+                                         
         ### END YOUR CODE ###
 
     def forward(self, X: np.ndarray) -> np.ndarray:
@@ -159,15 +161,19 @@ class FullyConnected(Layer):
             self._init_parameters(X.shape)
 
         ### BEGIN YOUR CODE ###
-        
+        W = self.parameters.get('W')
+        b = self.parameters.get('b')
+        Z = X @ W + b 
+
         # perform an affine transformation and activation
-        out = ...
-        
+        Y = self.activation(Z)
+
         # store information necessary for backprop in `self.cache`
+        self.cache['X'] = X
+        self.cache['Z'] = Z 
+        return Y 
 
         ### END YOUR CODE ###
-
-        return out
 
     def backward(self, dLdY: np.ndarray) -> np.ndarray:
         """Backward pass for fully connected layer.
@@ -189,19 +195,26 @@ class FullyConnected(Layer):
         ### BEGIN YOUR CODE ###
         
         # unpack the cache
+        X = self.cache.get('X')
+        Z = self.cache.get('Z')
+        W = self.parameters.get('W')
         
         # compute the gradients of the loss w.r.t. all parameters as well as the
         # input of the layer
-
-        dX = ...
+        dLdZ = self.activation.backward(Z, dLdY)
+        dLdW = X.T @ dLdZ
+        dLdb = np.sum(dLdZ, axis=0, keepdims=True)
+        dLdX = dLdZ @  W.T 
 
         # store the gradients in `self.gradients`
         # the gradient for self.parameters["W"] should be stored in
         # self.gradients["W"], etc.
+        self.gradients['W'] = dLdW
+        self.gradients['b'] = dLdb
 
         ### END YOUR CODE ###
 
-        return dX
+        return dLdX
 
 
 class BatchNorm1D(Layer):
@@ -225,16 +238,15 @@ class BatchNorm1D(Layer):
 
         ### BEGIN YOUR CODE ###
 
-        gamma = self.init_weights(...)
-        beta = ...
+        gamma = np.zeros((self.n_in, ))
+        beta = np.zeros((self.n_in, ))
 
         self.parameters = OrderedDict({"gamma": gamma, "beta": beta}) # DO NOT CHANGE THE KEYS
-        self.cache = OrderedDict({"X": ..., "X_hat": ..., 
-                                  "mu": ..., "var": ..., 
-                                  "running_mu": ..., "running_var": ...})  
+        self.cache = OrderedDict({"X": None, "X_hat": None, 
+                                  "mu": None, "var": None, 
+                                  "running_mu": None, "running_var": None})  
         # cache for backprop
-        self.gradients: OrderedDict = ...  # parameter gradients initialized to zero
-                                           # MUST HAVE THE SAME KEYS AS `self.parameters`
+        self.gradients = OrderedDict({"gamma": None, "beta": beta})
 
         ### END YOUR CODE ###
 
@@ -250,11 +262,32 @@ class BatchNorm1D(Layer):
         ### BEGIN YOUR CODE ###
 
         # implement a batch norm forward pass
+        if mode == 'train':
+            mu = np.mean(X, axis=0)
+            sigma = np.var(X, axis=0)
+            self.cache['running_mu'] = mu
+            self.cache['running_var'] = sigma
+        elif mode == 'test':
+            mu = self.cache['running_mu']
+            sigma = self.cache['running_var']
+        else: 
+            raise ValueError('invalid mode str')
+
+        X_hat = (X - mu) / np.sqrt(sigma - self.eps)
 
         # cache any values required for backprop
+        self.cache['X'] = X 
+        self.cache['X_hat'] = X_hat
+        self.chche['mu'] = mu 
+        self.cache['sigma'] = sigma
+
+        gamma = self.parameters['gamma']
+        beta = self.parameters['beta']
+
+        Y = gamma * X_hat + beta 
 
         ### END YOUR CODE ###
-        return out
+        return Y 
 
     def backward(self, dY: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -263,13 +296,26 @@ class BatchNorm1D(Layer):
         """
 
         ### BEGIN YOUR CODE ###
+        X = self.cache['X']
+        X_hat = self.cache['X_hat']
+        mu = self.cache['mu']
+        var = self.cache['var']
+        gamma = self.parameters['gamma']
+        batch_size = X.shape[0]
 
         # implement backward pass for batchnorm.
-
+        dGammadY = np.sum(dY * X_hat, axis=0)
+        dBetadY = np.sum(dY, axis=0)
+        dX_hatdY = dY * dGammadY
+        dVardY = np.sum(dX_hatdY * (X - mu) * (-0.5) * (var + self.eps)**(-1.5), axis=0)
+        dMudY = (np.sum(dX_hatdY * (-1.0 / np.sqrt(var + self.eps)), axis=0) + 
+           dVardY * np.sum(-2.0 * (X - mu), axis=0) / batch_size)
+        dXdY = (dX_hatdY / np.sqrt(var + self.eps) + 
+          dVardY * 2.0 * (X - mu) / batch_size + 
+          dMudY / batch_size)
         ### END YOUR CODE ###
         
-
-        return dX
+        return dXdY
 
 class Conv2D(Layer):
     """Convolutional layer for inputs with 2 spatial dimensions."""
@@ -334,20 +380,40 @@ class Conv2D(Layer):
         if self.n_in is None:
             self._init_parameters(X.shape)
 
+        ### BEGIN YOUR CODE ###
         W = self.parameters["W"]
         b = self.parameters["b"]
 
         kernel_height, kernel_width, in_channels, out_channels = W.shape
         n_examples, in_rows, in_cols, in_channels = X.shape
-        kernel_shape = (kernel_height, kernel_width)
+        pad_height, pad_width = self.pad
+        stride = self.stride
 
-        ### BEGIN YOUR CODE ###
+        out_row = (in_rows + 2 * pad_height - kernel_height) // stride + 1
+        out_col = (in_cols + 2 * pad_width - kernel_width) // stride + 1
+        out = np.zeros((n_examples, out_row, out_col, out_channels))
 
-        # implement a convolutional forward pass
+        X_padded = np.pad(
+            X, 
+            ((0, 0), (pad_height, pad_height), (pad_width, pad_width), (0, 0)),
+            mode="constant",
+        )
 
-        # cache any values required for backprop
+        for n in range(n_examples):
+            for r in range(out_row):
+                for c in range(out_col):
+                    r_start = r * stride
+                    r_end = r_start + kernel_height
+                    c_start = c * stride
+                    c_end = c_start + kernel_width
 
+                    X_patch = X_padded[n, r_start:r_end, c_start:c_end, :]
+                    conv_values = np.sum(X_patch[:, :, :, np.newaxis] * W, axis=(0, 1, 2))
+                    out[n, r, c, :] = conv_values + b
         ### END YOUR CODE ###
+        self.cache['X'] = X 
+        self.cache['Z'] = out
+        out = self.activation.forward(out)
 
         return out
 
@@ -369,12 +435,16 @@ class Conv2D(Layer):
         ### BEGIN YOUR CODE ###
 
         # perform a backward pass
+        X = self.cache['X']
+        Z = self.cache['Z']
+        W = self.parameters['W']
+
 
         ### END YOUR CODE ###
 
         return dX
 
-class Pool2D(Layer):
+class Pool2D(Layer):    
     """Pooling layer, implements max and average pooling."""
 
     def __init__(

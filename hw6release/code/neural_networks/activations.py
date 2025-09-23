@@ -89,7 +89,7 @@ class Sigmoid(Activation):
         f(z) as described above applied elementwise to `Z`
         """
         ### YOUR CODE HERE ###
-        return ...
+        return 1 / (1 + np.exp(-Z))
 
     def backward(self, Z: np.ndarray, dY: np.ndarray) -> np.ndarray:
         """Backward pass for sigmoid.
@@ -105,7 +105,7 @@ class Sigmoid(Activation):
         gradient of loss w.r.t. input of this layer
         """
         ### YOUR CODE HERE ###
-        return ...
+        return Z * (1 - Z) * dY
 
 
 class TanH(Activation):
@@ -159,7 +159,7 @@ class ReLU(Activation):
         f(z) as described above applied elementwise to `Z`
         """
         ### YOUR CODE HERE ###
-        return ...
+        return np.maximum(0, Z)
 
     def backward(self, Z: np.ndarray, dY: np.ndarray) -> np.ndarray:
         """Backward pass for relu activation.
@@ -175,7 +175,7 @@ class ReLU(Activation):
         gradient of loss w.r.t. input of this layer
         """
         ### YOUR CODE HERE ###
-        return ...
+        return dY * (Z > 0)
 
 
 class SoftMax(Activation):
@@ -195,7 +195,7 @@ class SoftMax(Activation):
         f(z) as described above applied elementwise to `Z`
         """
         ### YOUR CODE HERE ###
-        return ...
+        return np.exp(Z) / np.sum(np.exp(Z), axis=-1, keepdims=True)
 
     def backward(self, Z: np.ndarray, dY: np.ndarray) -> np.ndarray:
         """Backward pass for softmax activation.
@@ -211,7 +211,7 @@ class SoftMax(Activation):
         gradient of loss w.r.t. input of this layer
         """
         ### YOUR CODE HERE ###
-        return ...
+        return dY  # usually combined with cross-entropy loss
 
 
 class ArcTan(Activation):
