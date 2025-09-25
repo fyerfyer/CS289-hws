@@ -383,37 +383,68 @@ class Conv2D(Layer):
         ### BEGIN YOUR CODE ###
         W = self.parameters["W"]
         b = self.parameters["b"]
-
-        kernel_height, kernel_width, in_channels, out_channels = W.shape
-        n_examples, in_rows, in_cols, in_channels = X.shape
-        pad_height, pad_width = self.pad
+        pad_h, pad_w = self.pad
         stride = self.stride
 
-        out_row = (in_rows + 2 * pad_height - kernel_height) // stride + 1
-        out_col = (in_cols + 2 * pad_width - kernel_width) // stride + 1
-        out = np.zeros((n_examples, out_row, out_col, out_channels))
+        k_h, k_w, in_channels, _ = W.shape
+        n_examples, in_rows, in_cols, _ = X.shape 
+
+        out_rows = (in_rows + 2 * pad_h - k_h) // stride + 1 
+        out_cols = (in_cols + 2 * pad_w - k_w) // stride + 1 
 
         X_padded = np.pad(
-            X, 
-            ((0, 0), (pad_height, pad_height), (pad_width, pad_width), (0, 0)),
-            mode="constant",
+            X,
+            ((0, 0), (pad_h, pad_h), (pad_w, pad_w), (0, 0)),
+            mode='constant'
         )
 
-        for n in range(n_examples):
-            for r in range(out_row):
-                for c in range(out_col):
-                    r_start = r * stride
-                    r_end = r_start + kernel_height
-                    c_start = c * stride
-                    c_end = c_start + kernel_width
+        view_shape = (n_examples, out_rows, out_cols, k_h, k_w, in_channels)
+        s_n, s_r, s_c, s_ch = X_padded.strides
+        view_strides = (s_n, s_r * stride, s_c * stride, s_r, s_c, s_ch)
 
-                    X_patch = X_padded[n, r_start:r_end, c_start:c_end, :]
-                    conv_values = np.sum(X_patch[:, :, :, np.newaxis] * W, axis=(0, 1, 2))
-                    out[n, r, c, :] = conv_values + b
-        ### END YOUR CODE ###
+        X_windows = np.lib.stride_tricks.as_strided(
+            X_padded, 
+            shape=view_shape, 
+            strides=view_strides
+        )
+
+        out = np.einsum('nhwkij,kijo->nhwo', X_windows, W)
+        out += b 
+
+        # kernel_height, kernel_width, in_channels, out_channels = W.shape
+        # n_examples, in_rows, in_cols, in_channels = X.shape
+        # pad_height, pad_width = self.pad
+        # stride = self.stride
+
+        # out_row = (in_rows + 2 * pad_height - kernel_height) // stride + 1
+        # out_col = (in_cols + 2 * pad_width - kernel_width) // stride + 1
+        # out = np.zeros((n_examples, out_row, out_col, out_channels))
+
+        # X_padded = np.pad(
+        #     X, 
+        #     ((0, 0), (pad_height, pad_height), (pad_width, pad_width), (0, 0)),
+        #     mode="constant",
+        # )
+
+        # for n in range(n_examples):
+        #     for r in range(out_row):
+        #         for c in range(out_col):
+        #             r_start = r * stride
+        #             r_end = r_start + kernel_height
+        #             c_start = c * stride
+        #             c_end = c_start + kernel_width
+
+        #             X_patch = X_padded[n, r_start:r_end, c_start:c_end, :]
+        #             conv_values = np.sum(X_patch * W, axis=(0, 1, 2))
+        #             out[n, r, c, :] = conv_values
+        
+        # out += b
         self.cache['X'] = X 
         self.cache['Z'] = out
         out = self.activation.forward(out)
+
+
+        ### END YOUR CODE ###
 
         return out
 
@@ -435,14 +466,115 @@ class Conv2D(Layer):
         ### BEGIN YOUR CODE ###
 
         # perform a backward pass
+        # X = self.cache['X']
+        # Z = self.cache['Z']
+        # W = self.parameters['W']
+
+        # pad_h, pad_w = self.pad
+        # stride = self.stride
+
+        # n_examples, in_rows, in_cols, in_channels = X.shape
+        # kernal_h, kernal_w, _, out_channels = W.shape
+        # _, out_rows, out_cols, _ = dLdY.shape
+
+        # dLdZ = self.activation.backward(Z) * dLdY
+        # dLdb = np.sum(dLdZ, axis=(0, 1, 2))
+        # self.gradients['b'] = dLdb.reshape(1, -1)
+
+        # dLdW = np.zeros_like(W)
+        # dLdX = np.zeros_like(X)
+        # X_padded = np.pad(
+        #     X, 
+        #     ((0, 0), (pad_h, pad_h), (pad_w, pad_w), (0, 0)),
+        #     mode='constant'
+        # )
+
+        # dLdX_padded = np.zeros_like(X_padded)
+
+        # for n in range(n_examples):
+        #     for r in range(out_rows):
+        #         for c in range(out_cols):
+        #             r_start = r * stride
+        #             r_end = r_start + kernal_h
+        #             c_start = c * stride
+        #             c_end = c_start + kernal_w
+
+        #             X_patch = X_padded[n, r_start:r_end, ]
+        #             dLdZ_slice = dLdZ[n, r, c, :]
+        #             dLdW += np.einsum('ijk,l->ijkl', X_patch, dLdZ_slice)
+
+        #             dLdX_patch = np.einsum('ijkl,l->ijk', W, dLdZ_slice)
+        #             dLdX_padded[n, r_start:r_end, c_start:c_end, :] += dLdX_patch
+        
+        # self.gradients['W'] = dLdW
+        # if self.pad == (0, 0):
+        #     dLdX = dLdX_padded
+        # else:
+        #     dLdX = dLdX_padded[:, pad_h:-pad_h, pad_w:-pad_w, :]
+
         X = self.cache['X']
         Z = self.cache['Z']
-        W = self.parameters['W']
+        W = self.cache['W']
+        pad_h, pad_w = self.pad
+        stride = self.stride
+        n_examples, out_rows, out_cols, out_channels = dLdZ.shape
+        k_h, k_w, in_channels = self.kernel_shape
 
+        dLdZ = self.activation.backward(Z, dLdY)
+        dLdb = np.sum(dLdZ, axis=(0, 1, 2))
+        self.gradients['b'] = dLdb
 
+        X_padded = np.pad(
+            X,
+            ((0, 0), (pad_h, pad_h), (pad_w, pad_w), (0, 0)),
+            mode='constant'
+        )
+
+        view_shape = (n_examples, out_rows, out_cols, k_h, k_w, in_channels)
+        s_n, s_r, s_c, s_ch = X_padded.strides
+        view_strides = (s_n, s_r * stride, s_c * stride, s_r, s_c, s_ch)
+        X_windows = np.lib.stride_tricks.as_strided(
+            X_padded,
+            shape=view_shape,
+            strides=view_strides
+        )
+
+        dLdW = np.einsum('nhwijk,nhwo->ijko', X_windows, dLdZ)
+        self.gradients['W'] = dLdW
+
+        W_rot = np.rot90(W, 2, axes=(0, 1))
+        W_transposed = W_rot.transpose(0, 1, 3, 2)
+        if stride > 1:
+            unsampled = np.zeros(
+                            (n_examples, 
+                            (out_rows - 1) * stride + 1,
+                            (out_cols - 1) * stride + 1,
+                            out_channels)
+                        )
+            unsampled[:, ::stride, ::stride, :] = dLdZ
+        else:
+            unsampled = dLdZ 
+
+        unsampled_padded = np.pad(
+            unsampled, 
+            ((0,0), (k_h - 1 - pad_h, k_h - 1 - pad_h), (k_w - 1 - pad_w, k_w - 1 - pad_w), (0, 0)),
+            mode='constant'
+        )
+
+        _, in_rows, in_cols, _ = X.shape 
+        dLdZ_view_shape = (n_examples, in_rows, in_cols, k_h, k_w, out_channels)
+        u_s_n, u_s_r, u_s_c, u_s_ch = unsampled_padded.strides
+        dLdZ_view_strides = (u_s_n, u_s_r, u_s_c, u_s_r, u_s_c, u_s_ch)
+        dLdZ_windows = np.lib.stride_tricks.as_strided(
+            unsampled_padded,
+            shape=dLdZ_view_shape,
+            strides=dLdZ_view_strides
+        )
+
+        dLdX = np.einsum("nhwijo,ijok->nhwk", dLdZ_windows, W_transposed)
+        
         ### END YOUR CODE ###
-
-        return dX
+        return dLdX
 
 class Pool2D(Layer):    
     """Pooling layer, implements max and average pooling."""
@@ -478,13 +610,7 @@ class Pool2D(Layer):
         elif mode == "average":
             self.pool_fn = np.mean
 
-        self.cache = {
-            "out_rows": [],
-            "out_cols": [],
-            "X_pad": [],
-            "p": [],
-            "pool_shape": [],
-        }
+        self.cache = {}
         self.parameters = {}
         self.gradients = {}
 
@@ -507,8 +633,40 @@ class Pool2D(Layer):
         ### BEGIN YOUR CODE ###
 
         # implement the forward pass
+        n_examples, in_rows, in_cols, channels = X.shape
+        k_h, k_w = self.kernel_shape
+        pad_h, pad_w = self.pad
+        stride = self.stride
+
+        out_rows = (in_rows + 2 * pad_h - k_h) // stride + 1 
+        out_cols = (in_cols + 2 * pad_w - k_w) // stride + 1 
+
+        X_padded = np.pad(
+            X,
+            ((0, 0), (pad_h, pad_h), (pad_w, pad_w), (0, 0)),
+            mode='constant'
+        )
+
+        view_shape = (n_examples, out_rows, out_cols, k_h, k_w, channels)
+        s_n, s_c, s_r, s_ch = X_padded.strides
+        view_strides = (s_n, s_r * stride, s_c * stride, s_r, s_c, s_ch)
+        X_windows = view_strides = np.lib.stride_tricks.as_strided(
+            X_padded, 
+            shape=view_shape, 
+            strides=view_strides
+        )
+
+        # Rearrange to (N, out_H, out_W, C, k_H, k_W)
+        X_windows_permuted = X_windows.transpose(0, 1, 2, 5, 3, 4)
+        X_pool = self.pool_fn(X_windows_permuted, axis=(4, 5))
 
         # cache any values required for backprop
+        self.cache = {
+            "X_padded": X_padded,
+            "X_windows": X_windows,   # (N,H_out,W_out,k_h,k_w,C)
+            "out_rows": out_rows,
+            "out_cols": out_cols,
+        }
 
         ### END YOUR CODE ###
 
@@ -530,6 +688,50 @@ class Pool2D(Layer):
         ### BEGIN YOUR CODE ###
 
         # perform a backward pass
+        X_padded = self.cache["X_pad"]
+        X_windows = self.cache["X_windows"]
+        out_rows, out_cols = self.cache["out_rows"], self.cache["out_cols"]
+        k_h, k_w = self.kernel_shape
+        stride = self.stride
+        pad_h, pad_w = self.pad
+        n_examples, _, _, in_channels = X_padded.shape
+
+        dLdX_padded = np.zeros_like(X_padded)
+
+        if self.mode == 'max':
+            mask_vals = np.max(X_windows, axis=(3, 4), keepdims=True)
+            mask = np.sum(X_windows == mask_vals).astype(np.float32)
+            mask_sum = np.sum(mask, axis=(3, 4), keepdims=True)
+            mask /= (mask_sum + 1e-8)
+
+            dLdY_exp = dLdY[:, :, :, None, None, :] # (batch_size, out_rows, out_cols, k_h, k_w, channels)
+            grad_windows = mask * dLdY_exp
+        elif self.mode == 'average':
+            avg_factor = 1.0 / (k_h * k_w)
+            dLdY_exp = dLdY[:, :, :, None, None, :] * avg_factor
+            grad_windows = np.broadcast_to(dLdY_exp, X_windows.shape)
+        
+        i_idx = np.arange(out_rows) * stride
+        j_idx = np.arange(out_cols) * stride
+        di = np.arange(k_h)
+        dj = np.arange(k_w)
+        ii, dii = np.meshgrid(i_idx, di, indexing='ij')
+        jj, djj = np.meshgrid(j_idx, dj, indexing='ij')
+
+        row_idx = ii + dii 
+        col_idx = jj + djj
+
+        row_idx = np.reshape(1, out_rows, 1, k_h, 1, 1)
+        col_idx = np.reshape(1, 1, out_cols, 1, k_w, 1)
+
+        n_idx = np.arange(n_examples).reshape(n_examples, 1, 1, 1, 1, 1)
+        c_idx = np.arange(in_channels).reshape(1, 1, 1, 1, 1, in_channels)
+
+        np.add.at(dLdX_padded, (n_idx, row_idx, col_idx, c_idx), grad_windows)
+        if pad_h == 0 and pad_w == 0:
+            gradX = dLdX_padded
+        else:
+            gradX = dLdX_padded[:, pad_h:-pad_h, pad_w:-pad_w, :]
 
         ### END YOUR CODE ###
 
