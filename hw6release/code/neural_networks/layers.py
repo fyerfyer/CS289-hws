@@ -659,8 +659,10 @@ class Pool2D(Layer):
 
         # Rearrange to (N, out_H, out_W, C, k_H, k_W)
         X_windows_permuted = X_windows.transpose(0, 1, 2, 5, 3, 4)
+        
+        # Use the predefined pool_fn from __init__
         X_pool = self.pool_fn(X_windows_permuted, axis=(4, 5))
-
+        
         # cache any values required for backprop
         self.cache = {
             "X_padded": X_padded,
@@ -668,6 +670,12 @@ class Pool2D(Layer):
             "out_rows": out_rows,
             "out_cols": out_cols,
         }
+        
+        # For max pooling, also store argmax information for backward pass
+        if self.mode == "max":
+            # Store mask indicating max positions for efficient backward pass
+            max_mask = (X_windows_permuted == X_pool[:, :, :, :, None, None])
+            self.cache["max_mask"] = max_mask
 
         ### END YOUR CODE ###
 
@@ -700,8 +708,17 @@ class Pool2D(Layer):
         dLdX_padded = np.zeros_like(X_padded)
 
         if self.mode == 'max':
-            mask_vals = np.max(X_windows, axis=(3, 4), keepdims=True)
-            mask = (X_windows == mask_vals).astype(np.float32)
+            # Use precomputed max_mask if available, otherwise compute it
+            if "max_mask" in self.cache:
+                max_mask = self.cache["max_mask"]  # (N, out_H, out_W, C, k_H, k_W)
+                # Transpose back to match X_windows shape: (N, out_H, out_W, k_H, k_W, C)
+                mask = max_mask.transpose(0, 1, 2, 4, 5, 3).astype(np.float32)
+            else:
+                # Fallback to computing mask from X_windows
+                mask_vals = np.max(X_windows, axis=(3, 4), keepdims=True)
+                mask = (X_windows == mask_vals).astype(np.float32)
+            
+            # Handle ties by normalizing the mask
             mask_sum = np.sum(mask, axis=(3, 4), keepdims=True)
             mask /= (mask_sum + 1e-8)
 
