@@ -67,4 +67,5 @@ class CrossEntropy(Loss):
         predictions, `Y_hat`
         """
         ### YOUR CODE HERE ###
-        return - (Y - Y_hat) / Y_hat.shape[0]
+        # Standard cross-entropy gradient: -Y / Y_hat, averaged over batch
+        return -Y / (Y_hat + 1e-15) / Y_hat.shape[0]

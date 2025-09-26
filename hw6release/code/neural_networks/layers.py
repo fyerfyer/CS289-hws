@@ -219,10 +219,11 @@ class FullyConnected(Layer):
 
 class BatchNorm1D(Layer):
     def __init__(
-        self, 
+        self,
         weight_init: str = "xavier_uniform",
         eps: float = 1e-8,
         momentum: float = 0.9,
+        n_in: int = None,  # Accept n_in parameter for API compatibility
     ) -> None:
         super().__init__()
         
@@ -231,6 +232,7 @@ class BatchNorm1D(Layer):
 
         self.eps = eps
         self.momentum = momentum
+        self.n_in = n_in  # Store n_in though it will be set in _init_parameters
 
     def _init_parameters(self, X_shape: Tuple[int, int]) -> None:
         """Initialize all layer parameters (weights, biases)."""
@@ -242,19 +244,19 @@ class BatchNorm1D(Layer):
         beta = np.zeros((self.n_in, ))
 
         self.parameters = OrderedDict({"gamma": gamma, "beta": beta}) # DO NOT CHANGE THE KEYS
-        self.cache = OrderedDict({"X": None, "X_hat": None, 
-                                  "mu": None, "var": None, 
-                                  "running_mu": None, "running_var": None})  
+        self.cache = OrderedDict({"X": None, "X_hat": None,
+                                  "mu": None, "var": None,
+                                  "running_mu": np.zeros((1, self.n_in)), "running_var": np.zeros((1, self.n_in))})
         # cache for backprop
-        self.gradients = OrderedDict({"gamma": None, "beta": beta})
+        self.gradients = OrderedDict({"gamma": np.zeros_like(gamma), "beta": np.zeros_like(beta)})
 
         ### END YOUR CODE ###
 
     def forward(self, X: np.ndarray, mode: str = "train") -> np.ndarray:
         """ Forward pass for 1D batch normalization layer.
-        Allows taking in an array of shape (B, C) and performs batch normalization over it. 
+        Allows taking in an array of shape (B, C) and performs batch normalization over it.
 
-        We use Exponential Moving Average to update the running mean and variance. with alpha value being equal to self.gamma
+        We use Exponential Moving Average to update the running mean and variance. with alpha value being equal to self.momentum
 
         You should set the running mean and running variance to the mean and variance of the first batch after initializing it.
         You should also make separate cases for training mode and testing mode.
@@ -263,31 +265,35 @@ class BatchNorm1D(Layer):
 
         # implement a batch norm forward pass
         if mode == 'train':
-            mu = np.mean(X, axis=0)
-            sigma = np.var(X, axis=0)
-            self.cache['running_mu'] = mu
-            self.cache['running_var'] = sigma
+            mu = np.mean(X, axis=0, keepdims=True)  # Shape (1, n_features)
+            sigma = np.var(X, axis=0, keepdims=True)  # Shape (1, n_features)
+            
+            # Update running statistics with exponential moving average
+            # Note: running stats are initialized as zeros in _init_parameters
+            self.cache['running_mu'] = self.momentum * self.cache['running_mu'] + (1 - self.momentum) * mu
+            self.cache['running_var'] = self.momentum * self.cache['running_var'] + (1 - self.momentum) * sigma
+            
         elif mode == 'test':
             mu = self.cache['running_mu']
             sigma = self.cache['running_var']
-        else: 
+        else:
             raise ValueError('invalid mode str')
 
-        X_hat = (X - mu) / np.sqrt(sigma - self.eps)
+        X_hat = (X - mu) / np.sqrt(sigma + self.eps)
 
         # cache any values required for backprop
-        self.cache['X'] = X 
+        self.cache['X'] = X
         self.cache['X_hat'] = X_hat
-        self.chche['mu'] = mu 
-        self.cache['sigma'] = sigma
+        self.cache['mu'] = mu.flatten() if mu.ndim > 1 else mu  # Keep 1D for backward compatibility
+        self.cache['var'] = sigma.flatten() if sigma.ndim > 1 else sigma  # Keep 1D for backward compatibility
 
         gamma = self.parameters['gamma']
         beta = self.parameters['beta']
 
-        Y = gamma * X_hat + beta 
+        Y = gamma * X_hat + beta
 
         ### END YOUR CODE ###
-        return Y 
+        return Y
 
     def backward(self, dY: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -304,18 +310,21 @@ class BatchNorm1D(Layer):
         batch_size = X.shape[0]
 
         # implement backward pass for batchnorm.
-        dGammadY = np.sum(dY * X_hat, axis=0)
-        dBetadY = np.sum(dY, axis=0)
-        dX_hatdY = dY * dGammadY
-        dVardY = np.sum(dX_hatdY * (X - mu) * (-0.5) * (var + self.eps)**(-1.5), axis=0)
-        dMudY = (np.sum(dX_hatdY * (-1.0 / np.sqrt(var + self.eps)), axis=0) + 
-           dVardY * np.sum(-2.0 * (X - mu), axis=0) / batch_size)
-        dXdY = (dX_hatdY / np.sqrt(var + self.eps) + 
-          dVardY * 2.0 * (X - mu) / batch_size + 
-          dMudY / batch_size)
+        dGamma = np.sum(dY * X_hat, axis=0)
+        dBeta = np.sum(dY, axis=0)
+        dX_hat = dY * gamma
+        dVar = np.sum(dX_hat * (X - mu) * (-0.5) * (var + self.eps)**(-1.5), axis=0)
+        dMu = (np.sum(dX_hat * (-1.0 / np.sqrt(var + self.eps)), axis=0) +
+               dVar * np.sum(-2.0 * (X - mu), axis=0) / batch_size)
+        dX = (dX_hat / np.sqrt(var + self.eps) +
+              dVar * 2.0 * (X - mu) / batch_size +
+              dMu / batch_size)
+        
+        self.gradients["gamma"] = dGamma
+        self.gradients["beta"] = dBeta
         ### END YOUR CODE ###
         
-        return dXdY
+        return dX
 
 class Conv2D(Layer):
     """Convolutional layer for inputs with 2 spatial dimensions."""

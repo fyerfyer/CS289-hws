@@ -105,7 +105,8 @@ class Sigmoid(Activation):
         gradient of loss w.r.t. input of this layer
         """
         ### YOUR CODE HERE ###
-        return Z * (1 - Z) * dY
+        sigmoid_output = self.forward(Z)
+        return sigmoid_output * (1 - sigmoid_output) * dY
 
 
 class TanH(Activation):
@@ -195,7 +196,10 @@ class SoftMax(Activation):
         f(z) as described above applied elementwise to `Z`
         """
         ### YOUR CODE HERE ###
-        return np.exp(Z) / np.sum(np.exp(Z), axis=-1, keepdims=True)
+        # Numerically stable softmax
+        Z_shifted = Z - np.max(Z, axis=-1, keepdims=True)
+        exp_Z = np.exp(Z_shifted)
+        return exp_Z / np.sum(exp_Z, axis=-1, keepdims=True)
 
     def backward(self, Z: np.ndarray, dY: np.ndarray) -> np.ndarray:
         """Backward pass for softmax activation.
@@ -211,7 +215,19 @@ class SoftMax(Activation):
         gradient of loss w.r.t. input of this layer
         """
         ### YOUR CODE HERE ###
-        return dY  # usually combined with cross-entropy loss
+        # Compute softmax output
+        softmax_output = self.forward(Z)
+        
+        # For softmax jacobian: S_i * (delta_ij - S_j) where S is softmax output
+        # This gives us dL/dZ_i = sum_j (dL/dS_j * dS_j/dZ_i)
+        # = sum_j (dL/dS_j * S_j * (delta_ij - S_i))
+        # = dL/dS_i * S_i - S_i * sum_j(dL/dS_j * S_j)
+        
+        # Compute sum over last axis: sum_j(dY_j * S_j)
+        sum_term = np.sum(dY * softmax_output, axis=-1, keepdims=True)
+        
+        # Apply the jacobian
+        return softmax_output * (dY - sum_term)
 
 
 class ArcTan(Activation):
