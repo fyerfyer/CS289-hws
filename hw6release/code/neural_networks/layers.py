@@ -514,13 +514,14 @@ class Conv2D(Layer):
 
         X = self.cache['X']
         Z = self.cache['Z']
-        W = self.cache['W']
+        W = self.parameters['W']
         pad_h, pad_w = self.pad
         stride = self.stride
-        n_examples, out_rows, out_cols, out_channels = dLdZ.shape
-        k_h, k_w, in_channels = self.kernel_shape
+        k_h, k_w = self.kernel_shape
+        _, _, in_channels, _ = W.shape
 
         dLdZ = self.activation.backward(Z, dLdY)
+        n_examples, out_rows, out_cols, out_channels = dLdZ.shape
         dLdb = np.sum(dLdZ, axis=(0, 1, 2))
         self.gradients['b'] = dLdb
 
@@ -648,9 +649,9 @@ class Pool2D(Layer):
         )
 
         view_shape = (n_examples, out_rows, out_cols, k_h, k_w, channels)
-        s_n, s_c, s_r, s_ch = X_padded.strides
+        s_n, s_r, s_c, s_ch = X_padded.strides
         view_strides = (s_n, s_r * stride, s_c * stride, s_r, s_c, s_ch)
-        X_windows = view_strides = np.lib.stride_tricks.as_strided(
+        X_windows = np.lib.stride_tricks.as_strided(
             X_padded, 
             shape=view_shape, 
             strides=view_strides
@@ -688,7 +689,7 @@ class Pool2D(Layer):
         ### BEGIN YOUR CODE ###
 
         # perform a backward pass
-        X_padded = self.cache["X_pad"]
+        X_padded = self.cache["X_padded"]
         X_windows = self.cache["X_windows"]
         out_rows, out_cols = self.cache["out_rows"], self.cache["out_cols"]
         k_h, k_w = self.kernel_shape
@@ -700,7 +701,7 @@ class Pool2D(Layer):
 
         if self.mode == 'max':
             mask_vals = np.max(X_windows, axis=(3, 4), keepdims=True)
-            mask = np.sum(X_windows == mask_vals).astype(np.float32)
+            mask = (X_windows == mask_vals).astype(np.float32)
             mask_sum = np.sum(mask, axis=(3, 4), keepdims=True)
             mask /= (mask_sum + 1e-8)
 
@@ -721,8 +722,8 @@ class Pool2D(Layer):
         row_idx = ii + dii 
         col_idx = jj + djj
 
-        row_idx = np.reshape(1, out_rows, 1, k_h, 1, 1)
-        col_idx = np.reshape(1, 1, out_cols, 1, k_w, 1)
+        row_idx = row_idx.reshape(1, out_rows, 1, k_h, 1, 1)
+        col_idx = col_idx.reshape(1, 1, out_cols, 1, k_w, 1)
 
         n_idx = np.arange(n_examples).reshape(n_examples, 1, 1, 1, 1, 1)
         c_idx = np.arange(in_channels).reshape(1, 1, 1, 1, 1, in_channels)
